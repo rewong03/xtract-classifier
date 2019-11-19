@@ -62,6 +62,9 @@ def feature_from_dir(dir_path, feature_type="head", byte_num=512):# :( can't fig
     for feature in pools.imap(feature_from_file, file_paths):
         features.append(feature)
 
+    pools.close()
+    pools.join()
+
     return features
 
 
@@ -120,6 +123,9 @@ def features_from_list(file_paths):
 
     for feature in pools.imap(feature_from_file, file_paths):
         features.append(feature)
+
+    pools.close()
+    pools.join()
 
     return features
 
