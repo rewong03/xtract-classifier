@@ -18,9 +18,9 @@ def run_parser(file_parser):
     """
     parser = get_parser(file_parser[0])
     file = file_parser[1]
-
+    
     try:
-        metadata = {file: {file_parser[0]: parser.parse(file)}}
+        metadata = {tuple(file): {file_parser[0]: parser.parse(file)}}
         return metadata
     except Exception as e:
         return None
@@ -100,13 +100,12 @@ def matio_label_gen(directory, label_file=None, exclude_parsers=None):
     for metadata in file_metadata:
         file_path = list(metadata.keys())[0]
         file_label = list(metadata[file_path].keys())[0]
-
-        if isinstance(file_path, list):
+        if isinstance(file_path, tuple):
             for path in file_path:
                 file_row.append([path, os.path.getsize(path), file_label])
         else:
             file_row.append([file_path[0], os.path.getsize(file_path[0]), file_label])
-
+    print(file_row)
     with open(label_file, 'w', newline='') as f:
         csv_writer = csv.writer(f)
         csv_writer.writerow(["path", "size", "file_label"])
