@@ -105,7 +105,7 @@ def matio_label_gen(directory, label_file=None, exclude_parsers=None):
                 file_row.append([path, os.path.getsize(path), file_label])
         else:
             file_row.append([file_path[0], os.path.getsize(file_path[0]), file_label])
-    print(file_row)
+
     with open(label_file, 'w', newline='') as f:
         csv_writer = csv.writer(f)
         csv_writer.writerow(["path", "size", "file_label"])

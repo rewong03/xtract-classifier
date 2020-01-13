@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
+import time
 
 
 # Functions for getting features from files/directories
@@ -105,10 +106,154 @@ def grab_labels(csv_path):
             file_paths.append(row[0])
             labels.append(row[2])
 
+    labels.pop(0)
+    file_paths.pop(0)
+
     return labels, file_paths
 
 
-def features_from_list(file_paths):
+def single_label_encoder(label, unique_labels):
+    """Returns a numerical label for a value.
+
+    Parameters:
+    label (a): Label to turn into numerical value.
+    unique_labels (list (a)): List of all unique labels.
+
+    Return:
+    (int): label turned into a numerical value.
+    """
+    assert label in unique_labels, "{} not in unique labels".format(label)
+    return unique_labels.index(label) + 1
+
+
+def multilabel_label_encoder(labels):
+    """Turns labels into numerical labels.
+
+    E.g. ['a', 'b', 'a b'] -> [1, 2, [1, 2]]
+
+    Parameter:
+    labels (list): List of labels as taken from multilabel .csv.
+
+    Return:
+    labels: (list (int)): Returns a list containing integers for single labels
+    and a list of integers for multiple labels.
+    """
+    for idx, label in enumerate(labels):
+        if ' ' in label:
+            labels[idx] = label.split(' ')
+    # Only works if unique labels aren't within a nested list
+    unique_labels = list(set([label for label in labels if not(isinstance(label, list))]))
+
+    for idx, label in enumerate(labels):
+        if not(isinstance(label, list)):
+            labels[idx] = single_label_encoder(label, unique_labels)
+        else:
+            labels[idx] = [single_label_encoder(single_label, unique_labels) for single_label in label]
+
+    return labels
+
+
+def multilabel_to_categorical(encoded_labels):
+    """Hot-encodes labels as returned by multilabel_label_encoder.
+
+    E.g. [1, 2, [1, 2]] -> [[1, 0], [0, 1], [1, 1]]
+
+    Parameter:
+    encoded_labels (list (int)): Labels as returned by multilabel_label_encoder.
+
+    Return:
+    empty_categorical (list (list (int)): Returns hot-encoded version of encoded_labels.
+    """
+    categorical_length = max([encoded_label for encoded_label in encoded_labels if not(isinstance(encoded_label, list))])
+    empty_categorical = [[0 for _ in range(categorical_length)] for _ in range(len(encoded_labels))]
+
+    for idx, encoded_label in enumerate(encoded_labels):
+        if not(isinstance(encoded_label, list)):
+            empty_categorical[idx][encoded_label - 1] = 1
+        else:
+            for label in encoded_label:
+                empty_categorical[idx][label - 1] = 1
+
+    return empty_categorical
+
+
+def fix_multilabel(csv_path):
+    """Takes a csv label file with multiple labels for paths and merges
+    the labels together in a new csv file.
+
+    :param csv_path:
+    :return:
+    """
+    t0 = time.time()
+    labels = []
+    file_paths = []
+    new_file_paths = []
+    new_labels = []
+    duplicate_paths = {}
+
+    with open(csv_path) as label_file:
+        csv_reader = csv.reader(label_file, delimiter=',')
+        for row in csv_reader:
+            file_paths.append(row[0])
+            labels.append(row[2])
+
+    labels.pop(0)
+    file_paths.pop(0)
+
+    unique_paths, counts = np.unique(file_paths, return_counts=True)
+
+    paths_to_remove = []
+
+    for idx, unique_path in enumerate(unique_paths):
+        if counts[idx] > 1:
+            duplicate_paths.update({unique_path: counts[idx]})
+        else:
+            paths_to_remove.append(unique_path)
+
+    print("Cleaning paths...")
+
+    for idx, path in enumerate(paths_to_remove):
+        if idx % 1000 == 0:
+            print("{}/".format(idx, (len(paths_to_remove))))
+        for path_idx in range(len(file_paths)):
+            if path == file_paths[path_idx]:
+                new_file_paths.append(file_paths[path_idx])
+                new_labels.append(labels[path_idx])
+                del file_paths[path_idx]
+                del labels[path_idx]
+                break
+
+    print("Done cleaning")
+    print("Fixing labels...")
+
+    for duplicate_path in duplicate_paths:
+        multilabel = []
+
+        for idx, path in enumerate(file_paths):
+            if len(multilabel) == duplicate_paths[duplicate_path]:
+                break
+            elif path == duplicate_path:
+                multilabel.append(labels[idx])
+
+        new_file_paths.append(duplicate_path)
+        new_labels.append(' '.join(multilabel))
+
+    assert len(new_file_paths) == len(new_labels), "Missing file paths or labels"
+
+    new_rows = zip(new_file_paths, [0 for _ in range(len(new_file_paths) + 1)], new_labels)
+
+    print("Done fixing labels")
+
+    with open(os.path.join(os.path.dirname(csv_path),
+                           'new' + os.path.basename(csv_path)), 'w') as new_label_file:
+        label_file_writer = csv.writer(new_label_file, delimiter=',')
+        for new_row in new_rows:
+            label_file_writer.writerow(new_row)
+
+    print('Done rewriting csv')
+
+
+def feature_from_list(file_paths):
     """Grabs features from a list of file paths.
 
     Parameter:
@@ -188,3 +333,4 @@ def plot_confusion_matrix(cm,
     plt.tight_layout()
     plt.ylabel('Actual')
     plt.xlabel('Predict')
+
