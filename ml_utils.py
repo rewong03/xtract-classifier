@@ -1,10 +1,10 @@
 import os
 import csv
+import collections
 import itertools
 import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
-import time
 
 
 # Functions for getting features from files/directories
@@ -32,7 +32,7 @@ def feature_from_file(file_path, feature_type="head", byte_num=512):  # will add
                 byte = f.read(1)
 
             if len(features) < byte_num:
-                features.extend([b'' for i in range(byte_num - len(features))])
+                features.extend([b'' for _ in range(byte_num - len(features))])
 
             assert len(features) == byte_num
             return features
@@ -112,45 +112,95 @@ def grab_labels(csv_path):
     return labels, file_paths
 
 
-def single_label_encoder(label, unique_labels):
-    """Returns a numerical label for a value.
-
-    Parameters:
-    label (a): Label to turn into numerical value.
-    unique_labels (list (a)): List of all unique labels.
-
-    Return:
-    (int): label turned into a numerical value.
-    """
-    assert label in unique_labels, "{} not in unique labels".format(label)
-    return unique_labels.index(label) + 1
-
-
-def multilabel_label_encoder(labels):
-    """Turns labels into numerical labels.
-
-    E.g. ['a', 'b', 'a b'] -> [1, 2, [1, 2]]
-
-    Parameter:
-    labels (list): List of labels as taken from multilabel .csv.
-
-    Return:
-    labels: (list (int)): Returns a list containing integers for single labels
-    and a list of integers for multiple labels.
-    """
-    for idx, label in enumerate(labels):
-        if ' ' in label:
-            labels[idx] = label.split(' ')
-    # Only works if unique labels aren't within a nested list
-    unique_labels = list(set([label for label in labels if not(isinstance(label, list))]))
-
-    for idx, label in enumerate(labels):
-        if not(isinstance(label, list)):
-            labels[idx] = single_label_encoder(label, unique_labels)
+def flatten(lst):
+    flattened = []
+    for item in lst:
+        if isinstance(item, list):
+            flattened.extend(item)
         else:
-            labels[idx] = [single_label_encoder(single_label, unique_labels) for single_label in label]
+            flattened.append(item)
 
-    return labels
+    return flattened
+
+
+class LabelEncoder:
+    """
+    Label encodes data values to numerical values.
+    """
+    def __init__(self):
+        self.keys = {}
+        self.inverse_keys = {}
+
+    def fit(self, labels):
+        """Creates a dictionary of unique keys given a list of labels.
+
+        Parameter:
+        labels (list (a)): List of any data type representing labels.
+        """
+        for idx, label in enumerate(labels):
+            if ' ' in label:
+                labels[idx] = label.split(' ')
+
+        labels = flatten(labels)
+
+        unique_labels = list(set([label for label in labels if not (isinstance(label, list))]))
+        unique_labels.sort()
+
+        for idx, unique_label in enumerate(unique_labels):
+            self.keys.update({unique_label: idx + 1})
+            self.inverse_keys.update({idx + 1: unique_label})
+
+    def single_transform(self, label):
+        assert self.keys[label], "Label not found"
+        return self.keys[label]
+
+    def transform(self, labels):
+        """Turns a list of labels into a list of numerical values.
+
+        E.g. ['a', 'b', 'a b'] -> [1, 2, [1, 2]]
+
+        Parameter:
+        labels (list (a)): List of labels to transform into numerical values.
+
+        Return:
+        labels (list (int)): List of numerical values.
+        """
+        for idx, label in enumerate(labels):
+            if ' ' in label:
+                labels[idx] = label.split(' ')
+
+        for idx, label in enumerate(labels):
+            if isinstance(label, list):
+                labels[idx] = [self.single_transform(x) for x in label]
+            else:
+                labels[idx] = self.single_transform(label)
+
+        return labels
+
+    def fit_transform(self, labels):
+        self.fit(labels)
+        return self.transform(labels)
+
+    def single_inverse_transform(self, encoded_label):
+        assert self.inverse_keys[encoded_label], "Label not found"
+        return self.inverse_keys[encoded_label]
+
+    def inverse_transform(self, encoded_labels):
+        """Turns encoded labels into their original values.
+
+        Parameter:
+        encoded_labels (list (int)): Labels encoded using the .fit() method.
+
+        Return:
+        encoded_labels (list (a)): Original values of encoded_label input.
+        """
+        for idx, encoded_label in enumerate(encoded_labels):
+            if isinstance(encoded_label, list):
+                encoded_labels[idx] = [self.single_inverse_transform(x) for x in encoded_label]
+            else:
+                encoded_labels[idx] = self.single_inverse_transform(encoded_label)
+
+        return encoded_labels
 
 
 def multilabel_to_categorical(encoded_labels):
@@ -164,7 +214,7 @@ def multilabel_to_categorical(encoded_labels):
     Return:
     empty_categorical (list (list (int)): Returns hot-encoded version of encoded_labels.
     """
-    categorical_length = max([encoded_label for encoded_label in encoded_labels if not(isinstance(encoded_label, list))])
+    categorical_length = max(flatten(encoded_labels))
     empty_categorical = [[0 for _ in range(categorical_length)] for _ in range(len(encoded_labels))]
 
     for idx, encoded_label in enumerate(encoded_labels):
@@ -184,7 +234,6 @@ def fix_multilabel(csv_path):
     :param csv_path:
     :return:
     """
-    t0 = time.time()
     labels = []
     file_paths = []
     new_file_paths = []
@@ -289,6 +338,19 @@ def convert_to_index(array_categorical):
     array_index (list): List of integers.
     """
     array_index = [np.argmax(array_temp) for array_temp in array_categorical]
+    return array_index
+
+
+def multiclass_convert_to_index(array_categorical):
+    array_index = list(map((lambda x: [1 if i > 0.5 else 0 for i in x]), array_categorical))
+
+    for idx, index in enumerate(array_index):
+        labels = list(map((lambda x: x + 1), np.argwhere(index == np.amax(index)).flatten().tolist()))
+        if len(labels) == 1:
+            array_index[idx] = labels[0]
+        else:
+            array_index[idx] = labels
+
     return array_index
 
 
